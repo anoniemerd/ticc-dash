@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${GITHUB_SHA}"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@af63523ba5f55733d817da0fdb813e660152c72c
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@703896b4f30f62d53f5530a80bcdc589a3f702bc
+        with:
+          images: ${{ vars.REGISTRY_OWNER }}/${{ vars.REGISTRY_REPOSITORY }}
+          tags: |
+            type=raw,value=${{ github.sha }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{version}},enable=${{ github.event_name == 'push' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name == 'push' }}
+            type=semver,pattern={{major}},enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Generate artifact attestation
+        if: github.event_name == 'push'
+        uses: actions/attest@v4
+        with:
+          subject-name: index.docker.io/${{ vars.REGISTRY_OWNER }}/${{ vars.REGISTRY_REPOSITORY }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Create release package
+        if: github.event_name == 'push'
+        run: |
+          mkdir "ticc-dash-${{ steps.version.outputs.version }}"
+
+          cp \
+            install_ticc_dash.sh \
+            README.md \
+            ticc-dash.py \
+            uninstall_ticc_dash.sh \
+            "ticc-dash-${{ steps.version.outputs.version }}/"
+
+          chmod +x "ticc-dash-${{ steps.version.outputs.version }}"/*.sh
+
+          cd "ticc-dash-${{ steps.version.outputs.version }}"
+          zip -r "../ticc-dash-${{ steps.version.outputs.version }}.zip" .
+
+      - name: Generate changelog
+        if: github.event_name == 'push'
+        run: |
+          previous_tag=$(git tag --sort=-version:refname |
+            grep -v "^${GITHUB_REF_NAME}$" |
+            head -n 1)
+
+          if [ -n "$previous_tag" ]; then
+            git log \
+              --pretty=format:'- %s (%h)' \
+              "$previous_tag..${GITHUB_REF_NAME}" \
+              > CHANGELOG.md
+          else
+            git log \
+              --pretty=format:'- %s (%h)' \
+              "${GITHUB_REF_NAME}" \
+              > CHANGELOG.md
+          fi
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## Changelog"
+            echo
+            cat CHANGELOG.md
+            echo
+            echo "## Docker image"
+            echo
+            echo '```'
+            echo "${{ vars.REGISTRY_OWNER }}/${{ vars.REGISTRY_REPOSITORY }}:${{ steps.version.outputs.version }}"
+            echo '```'
+          } > release-notes.md
+
+          gh release create "${GITHUB_REF_NAME}" \
+            "ticc-dash-${{ steps.version.outputs.version }}.zip" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md

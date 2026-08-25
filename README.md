@@ -160,6 +160,42 @@ http://<your-server-ip>:5000/
 
 ---
 
+## Configuration
+
+The application can be configured using environment variables.
+
+| Variable | Default | Description |
+|---|---|---|
+| `TZ` | `Etc/UTC` | Timezone used by the application. |
+| `CHRONY_USE_SUDO` | `true` | Whether to execute `chronyc` through `sudo`. Set to `false` when the container user can access the Chrony command socket directly. |
+| `CHRONY_SOCKET` | unset | Path to the Chrony Unix command socket. When set, `chronyc` is invoked with `-n -h <socket>`. |
+
+For example:
+
+```bash
+TZ: "Europe/Warsaw"
+CHRONY_USE_SUDO: "false"
+CHRONY_SOCKET: "/var/run/chrony/chronyd.sock"
+```
+With this configuration, the application executes:
+
+`chronyc -n -h /var/run/chrony/chronyd.sock clients`
+
+## Containers
+
+The application can be run as a container using the provided `Dockerfile`:
+
+```bash
+docker build -t ticc-dash .
+docker run --rm -p 5000:5000 ticc-dash
+```
+
+When running alongside a Chrony container, mount the Chrony runtime socket into the dashboard container:
+
+`docker run --rm -v /var/run/chrony:/var/run/chrony:ro -p 5000:5000 ticc-dash`
+
+The container by default listens on port `5000`.
+
 ## 🧠 Troubleshooting
 
 | Problem | Solution |
@@ -177,6 +213,7 @@ More tips: <https://ticc-dash.org/docs.html#troubleshooting>.
 
 - Author: **Anoniemerd** — <https://github.com/anoniemerd>
 - Website: <https://ticc-dash.org>
+- Container support: **Venthe** - <https://github.com/venthe>
 
 Released under the **MIT License**.  
 © 2025 – TICC‑DASH Project.
