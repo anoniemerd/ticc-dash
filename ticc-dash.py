@@ -265,6 +265,7 @@ def dashboard():
                     <option value="ip_order">Sort by: IP Address (IPv4 numeric, then others)</option>
                     <option value="drop_desc">Sort by: Drop Count (high → low)</option>
                     <option value="last_recent">Sort by: Last Seen (recent → old)</option>
+		    <option value="ntp_packets">Sort by: NTP Packets (high → low)</option>
                 </select>
                 <input id="search" type="text" class="form-control" placeholder="Search clients..."/>
             </div>
@@ -339,6 +340,7 @@ def dashboard():
                     rows.sort((a,b)=>{ const A=ipTuple(a.addr||""),B=ipTuple(b.addr||""); if(A&&B){ for(let i=0;i<4;i++){ if(A[i]!=B[i]) return A[i]-B[i]; } return 0; } if(A&&!B) return -1; if(!A&&B) return 1; return (a.addr||"").toLowerCase().localeCompare((b.addr||"").toLowerCase()); });
                 } else if(mode==="drop_desc"){ rows.sort((a,b)=> toInt(b.Drop)-toInt(a.Drop)); }
                 else if(mode==="last_recent"){ rows.sort((a,b)=>{ const as=lastToSeconds(a.Last), bs=lastToSeconds(b.Last); if(as===null&&bs===null) return 0; if(as===null) return 1; if(bs===null) return -1; return as-bs; }); }
+		else if(mode==="ntp_packets"){ rows.sort((a,b)=> toInt(b.NTP)-toInt(a.NTP)); }
                 return rows;
             }
 
