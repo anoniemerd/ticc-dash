@@ -31,7 +31,7 @@ def _is_ipv6(addr: str) -> bool:
     except OSError:
         return False
 
-def _parse_client_line(line: str):
+def _parse_client_line(line: str, ip="-"):
     parts = line.split()
     if not parts:
         return None
@@ -40,6 +40,7 @@ def _parse_client_line(line: str):
     def g(i): return f[i] if i < len(f) else ""
     return {
         "addr": addr,
+        "ip": ip,
         "NTP": g(0),
         "Drop": g(1),
         "Int": g(2),
@@ -51,32 +52,25 @@ def _parse_client_line(line: str):
 def get_chrony_clients():
     try:
         output = subprocess.check_output(command, universal_newlines=True)
+        numeric_command = command.copy()
+        numeric_command.insert(-1, "-n")
+        numeric_output = subprocess.check_output(numeric_command, universal_newlines=True)
     except Exception as e:
         return [], 0, f"Error: {e}"
 
     lines = output.strip().split("\n")
+    numeric_lines = numeric_output.strip().split("\n")
     if len(lines) < 3:
         return [], 0, ""
 
     body = [ln.rstrip() for ln in lines[2:] if ln.strip() != ""]
-    hostnames, ipv4s, ipv6s = [], [], []
-    for ln in body:
-        addr = (ln.split() or [""])[0]
-        if _is_ipv4(addr):
-            ipv4s.append(ln)
-        elif _is_ipv6(addr):
-            ipv6s.append(ln)
-        else:
-            hostnames.append(ln)
-
-    hostnames.sort(key=lambda x: x.split()[0].lower())
-    ipv4s.sort(key=lambda x: tuple(map(int, (x.split()[0]).split("."))))
-    ipv6s.sort(key=lambda x: x.split()[0])
-    sorted_lines = hostnames + ipv4s + ipv6s
-
+    numeric_body = [ln.rstrip() for ln in numeric_lines[2:] if ln.strip() != ""]
     parsed = []
-    for ln in sorted_lines:
-        row = _parse_client_line(ln)
+    for i, ln in enumerate(body):
+        ip = "-"
+        if i < len(numeric_body):
+            ip = (numeric_body[i].split() or ["-"])[0]
+        row = _parse_client_line(ln, ip)
         if row:
             parsed.append(row)
     return parsed, len(parsed), ""
@@ -262,7 +256,8 @@ def dashboard():
 
             <div class="controls">
                 <select id="sort-select" class="form-select" title="Sort clients">
-                    <option value="ip_order">Sort by: IP Address (IPv4 numeric, then others)</option>
+                    <option value="hostname">Sort by: Hostname (A → Z)</option>
+                    <option value="ip_order">Sort by: IP Address (numeric)</option>
                     <option value="drop_desc">Sort by: Drop Count (high → low)</option>
                     <option value="last_recent">Sort by: Last Seen (recent → old)</option>
                 </select>
@@ -274,6 +269,7 @@ def dashboard():
                     <colgroup>
                         <col style="width:32px" />
                         <col />
+                        <col style="width:150px" />
                         <col style="width:120px" />
                         <col style="width:84px" />
                         <col style="width:84px" />
@@ -284,7 +280,8 @@ def dashboard():
                     <thead>
                         <tr>
                             <th class="caret-cell"></th>
-                            <th>Address</th>
+                            <th>Hostname</th>
+                            <th>IP Address</th>
                             <th class="text-center">Status</th>
                             <th class="text-end">NTP</th>
                             <th class="text-end">Drop</th>
@@ -335,8 +332,11 @@ def dashboard():
 
             function ipTuple(a){ if(!/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(a)) return null; return a.split(".").map(n=>parseInt(n,10)); }
             function sortRows(rows, mode){
-                if(mode==="ip_order"){
-                    rows.sort((a,b)=>{ const A=ipTuple(a.addr||""),B=ipTuple(b.addr||""); if(A&&B){ for(let i=0;i<4;i++){ if(A[i]!=B[i]) return A[i]-B[i]; } return 0; } if(A&&!B) return -1; if(!A&&B) return 1; return (a.addr||"").toLowerCase().localeCompare((b.addr||"").toLowerCase()); });
+                if(mode==="hostname"){
+                    rows.sort((a,b)=>(a.addr||"").toLowerCase().localeCompare((b.addr||"").toLowerCase()));
+                }
+                else if(mode==="ip_order"){
+                    rows.sort((a,b)=>{ const A=ipTuple(a.ip||""),B=ipTuple(b.ip||""); if(A&&B){ for(let i=0;i<4;i++){ if(A[i]!=B[i]) return A[i]-B[i]; } return 0; } if(A&&!B) return -1; if(!A&&B) return 1; return (a.ip||"").localeCompare(b.ip||""); });
                 } else if(mode==="drop_desc"){ rows.sort((a,b)=> toInt(b.Drop)-toInt(a.Drop)); }
                 else if(mode==="last_recent"){ rows.sort((a,b)=>{ const as=lastToSeconds(a.Last), bs=lastToSeconds(b.Last); if(as===null&&bs===null) return 0; if(as===null) return 1; if(bs===null) return -1; return as-bs; }); }
                 return rows;
@@ -345,19 +345,21 @@ def dashboard():
             function updateSummary(rows){ let ok=0,w=0,b=0; rows.forEach(r=>{ const s=severity(r); if(s===0) ok++; else if(s===1) w++; else b++; }); $("#count-ok").text(ok); $("#count-warn").text(w); $("#count-bad").text(b); }
 
             function detailHTML(r){ return `
-                <tr class="detail-row" data-detail-for="${r.addr}"><td></td><td colspan="7">
+                <tr class="detail-row" data-detail-for="${r.addr}"><td></td><td colspan="8">
                     <div class="metrics">
                         <div class="metric"><div class="label">🕙 NTP Packets</div><div class="value">${r.NTP||"-"}</div></div>
                         <div class="metric"><div class="label">📉 Dropped Packets</div><div class="value">${r.Drop||"-"}</div></div>
                         <div class="metric"><div class="label">📨 Command Packets</div><div class="value">${r.Cmd||"-"}</div></div>
                         <div class="metric"><div class="label">🔄 Interval</div><div class="value">${r.Int||"-"}</div></div>
                         <div class="metric"><div class="label">👁️ Last Seen</div><div class="value">${humanLast(r.Last)}</div></div>
+                        <div class="metric"><div class="label">🌐 IP Address</div><div class="value">${r.ip||"-"}</div></div>
                     </div>
                 </td></tr>`; }
             function rowHTML(r){ const sev=severity(r), addr=r.addr||"", open=openSet.has(addr), caret=open?"▲":"▼"; return `
                 <tr class="client-row sev-${sev}" data-addr="${addr}">
                     <td class="caret-cell"><span class="caret">${caret}</span></td>
                     <td class="addr-cell" title="${addr}">${iconForAddr(addr)}&nbsp; ${addr}</td>
+                    <td class="addr-cell">${r.ip||"-"}</td>
                     <td class="text-center">${sevLabel(sev)}</td>
                     <td class="td-num">${r.NTP||"-"}</td><td class="td-num">${r.Drop||"-"}</td><td class="td-num">${r.Cmd||"-"}</td><td class="td-num">${r.Int||"-"}</td>
                     <td class="last-cell">${humanLast(r.Last)}</td>
