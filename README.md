@@ -89,7 +89,9 @@ Full uninstall notes: <https://ticc-dash.org/uninstall.html>.
 
 ## 🧠 How it works
 
-- Runs `chronyc clients` via `sudo` to collect live NTP client data.
+- Runs `chronyc clients` via `sudo` to collect live NTP client data (directly when the service runs as root).
+  The sudoers rule sets `!log_allowed, !pam_session` for `chronyc` only, so the once-a-second poll doesn't
+  write three log lines per call to the journal.
 - Parses and groups hostnames, IPv4 and IPv6.
 - Exposes two endpoints: `/` (dashboard UI) and `/data` (JSON).
 - Frontend uses small AJAX calls every second for live updates.
@@ -169,6 +171,23 @@ The application can be configured using environment variables.
 | `TZ` | `Etc/UTC` | Timezone used by the application. |
 | `CHRONY_USE_SUDO` | `true` | Whether to execute `chronyc` through `sudo`. Set to `false` when the container user can access the Chrony command socket directly. |
 | `CHRONY_SOCKET` | unset | Path to the Chrony Unix command socket. When set, `chronyc` is invoked with `-n -h <socket>`. |
+| `SYNC_SAMPLE_INTERVAL` | `10` | Seconds between sync-history samples (offset, RMS offset, frequency, CPU temperature, per-source offsets). |
+| `SYNC_HISTORY_SECONDS` | `86400` | How much sync history to keep. History lives in memory and starts over when the service restarts. |
+| `CPU_TEMP_PATH` | `/sys/class/thermal/thermal_zone0/temp` | CPU temperature source, plotted against frequency error (crystal drift follows temperature). |
+| `GPSD_HOST` / `GPSD_PORT` | `127.0.0.1` / `2947` | gpsd to query for GPS fix, satellites used/visible and HDOP. Shown as "gpsd not reachable" if absent. |
+
+### Time sync panel
+
+Above the client list, the front page shows whether this server is actually synchronised and to what:
+
+- 🟢 synchronised to a local reference clock (e.g. PPS), or to the network when no reference clock is configured
+- 🟡 synchronised over the network although a reference clock is configured — the GPS/PPS is not being used
+- 🔴 not synchronised
+
+It also lists reference, stratum, system clock offset, RMS offset, frequency error, root dispersion, last clock update,
+leap status, CPU temperature, GPS fix, every chrony source with its reach register (last 8 polls), and graphs of
+offset/RMS, frequency vs CPU temperature, and per-source offsets over 15 min – 24 h. JSON is available at `/sync` and
+`/sync/history?range=<seconds>`. The history sampler runs in the web process, so run gunicorn with a single worker (the default).
 
 For example:
 
