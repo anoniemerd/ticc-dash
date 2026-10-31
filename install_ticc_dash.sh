@@ -42,12 +42,18 @@ ok "✅ Dependencies installed."
 
 # 2) Sudo for chronyc
 log "🔐 Configuring sudo permission for chronyc..."
-if sudo test -f "$SUDOERS_FILE" && sudo grep -q "/usr/bin/chronyc" "$SUDOERS_FILE"; then
+# The dashboard polls chronyc every second; without the Defaults line each poll
+# writes a sudo log line plus a PAM session open/close pair to the journal.
+if sudo test -f "$SUDOERS_FILE" && sudo grep -q "^$USER_NAME .*/usr/bin/chronyc" "$SUDOERS_FILE" \
+   && sudo grep -q "!log_allowed" "$SUDOERS_FILE"; then
   ok "✅ Sudo rule already exists."
 else
-  run "echo '$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/chronyc' | sudo tee '$SUDOERS_FILE' >/dev/null"
-  run "sudo chmod 440 '$SUDOERS_FILE'"
-  run "sudo visudo -c"
+  SUDOERS_TMP="$(mktemp)"
+  printf '%s\n' 'Defaults!/usr/bin/chronyc !log_allowed, !pam_session' \
+    "$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/chronyc" > "$SUDOERS_TMP"
+  run "sudo visudo -cf '$SUDOERS_TMP'"
+  run "sudo install -o root -g root -m 440 '$SUDOERS_TMP' '$SUDOERS_FILE'"
+  rm -f "$SUDOERS_TMP"
   ok "✅ Sudo rule added."
 fi
 

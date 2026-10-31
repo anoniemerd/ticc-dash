@@ -89,7 +89,9 @@ Full uninstall notes: <https://ticc-dash.org/uninstall.html>.
 
 ## 🧠 How it works
 
-- Runs `chronyc clients` via `sudo` to collect live NTP client data.
+- Runs `chronyc clients` via `sudo` to collect live NTP client data (directly when the service runs as root).
+  The sudoers rule sets `!log_allowed, !pam_session` for `chronyc` only, so the once-a-second poll doesn't
+  write three log lines per call to the journal.
 - Parses and groups hostnames, IPv4 and IPv6.
 - Exposes two endpoints: `/` (dashboard UI) and `/data` (JSON).
 - Frontend uses small AJAX calls every second for live updates.
